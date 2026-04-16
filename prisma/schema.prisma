@@ -1,0 +1,339 @@
+// VibeCode Academy — Prisma Schema
+// SQLite для разработки, PostgreSQL для продакшена
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ПОЛЬЗОВАТЕЛЬ
+// ============================================
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  name           String?
+  image          String?
+  emailVerified  DateTime?
+  hashedPassword String?
+  role           String   @default("student") // student | admin
+
+  // Gamification
+  totalXP        Int      @default(0)
+  currentStreak  Int      @default(0)
+  longestStreak  Int      @default(0)
+  lastActiveAt   DateTime?
+
+  // Timestamps
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  accounts             Account[]
+  sessions             Session[]
+  lessonProgress       LessonProgress[]
+  studySessions        StudySession[]
+  achievements         UserAchievement[]
+  quizAttempts         QuizAttempt[]
+  homeworkSubmissions  HomeworkSubmission[]
+  practiceSubmissions  PracticeSubmission[]
+  aiChatMessages       AiChatMessage[]
+
+  @@map("users")
+}
+
+// ============================================
+// NEXTAUTH — ACCOUNTS & SESSIONS
+// ============================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================
+// КУРСЫ — МОДУЛИ И УРОКИ
+// ============================================
+
+model Module {
+  id            String   @id @default(cuid())
+  title         String
+  titleEn       String?
+  description   String
+  descriptionEn String?
+  emoji         String
+  order         Int      @unique
+  isPublished   Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lessons     Lesson[]
+
+  @@map("modules")
+}
+
+model Lesson {
+  id               String   @id @default(cuid())
+  title            String
+  titleEn          String?
+  description      String
+  descriptionEn    String?
+  content          String   // Markdown (RU)
+  contentEn        String?  // Markdown (EN)
+  durationMinutes  Int      @default(15)
+  order            Int
+  isFree           Boolean  @default(false)
+  isPublished      Boolean  @default(true)
+  xpReward         Int      @default(50)
+  requiresHomework Boolean  @default(false)
+
+  moduleId        String
+  module          Module   @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  progress            LessonProgress[]
+  quiz                Quiz?
+  quizAttempts        QuizAttempt[]
+  homeworkSubmissions HomeworkSubmission[]
+  practiceTasks       PracticeTask[]
+
+  @@unique([moduleId, order])
+  @@map("lessons")
+}
+
+// ============================================
+// КВИЗЫ
+// ============================================
+
+model Quiz {
+  id        String         @id @default(cuid())
+  lessonId  String         @unique
+  lesson    Lesson         @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  questions QuizQuestion[]
+  xpReward  Int            @default(20)
+  createdAt DateTime       @default(now())
+
+  @@map("quizzes")
+}
+
+model QuizQuestion {
+  id           String   @id @default(cuid())
+  quizId       String
+  quiz         Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  text         String
+  options      String   // JSON-строка: ["вариант1", "вариант2", ...]
+  correctIndex Int
+  explanation  String?
+  order        Int      @default(0)
+
+  @@map("quiz_questions")
+}
+
+model QuizAttempt {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lessonId  String
+  lesson    Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  score     Int
+  total     Int
+  xpEarned  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, lessonId])
+  @@map("quiz_attempts")
+}
+
+// ============================================
+// ПРОГРЕСС ОБУЧЕНИЯ
+// ============================================
+
+model LessonProgress {
+  id          String    @id @default(cuid())
+  userId      String
+  lessonId    String
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  timeSpent   Int       @default(0) // в секундах
+  xpEarned    Int       @default(0)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, lessonId])
+  @@map("lesson_progress")
+}
+
+// ============================================
+// СЕССИИ ОБУЧЕНИЯ (для трекинга времени)
+// ============================================
+
+model StudySession {
+  id        String    @id @default(cuid())
+  userId    String
+  lessonId  String?
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  duration  Int?      // в секундах
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("study_sessions")
+}
+
+// ============================================
+// СИСТЕМА ДОСТИЖЕНИЙ
+// ============================================
+
+model Achievement {
+  id          String  @id @default(cuid())
+  slug        String  @unique // first-step, week-streak, etc.
+  title       String
+  description String
+  emoji       String
+  xpReward    Int     @default(100)
+  condition   String  // JSON: { type: "lessons_count", value: 1 }
+  isSecret    Boolean @default(false)
+
+  users UserAchievement[]
+
+  @@map("achievements")
+}
+
+// ============================================
+// ДОМАШНИЕ ЗАДАНИЯ
+// ============================================
+
+model HomeworkSubmission {
+  id          String   @id @default(cuid())
+  userId      String
+  lessonId    String
+  fileUrl     String?  // путь к файлу или внешний URL
+  fileName    String?
+  comment     String?  // текстовый комментарий / ссылка на проект
+  submittedAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@map("homework_submissions")
+}
+
+// ============================================
+// ПРАКТИЧЕСКИЕ ЗАДАНИЯ
+// ============================================
+
+model PracticeTask {
+  id            String               @id @default(cuid())
+  lessonId      String
+  title         String
+  titleEn       String
+  description   String
+  descriptionEn String
+  order         Int
+
+  lesson      Lesson               @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  submissions PracticeSubmission[]
+
+  @@unique([lessonId, order])
+  @@map("practice_tasks")
+}
+
+model PracticeSubmission {
+  id          String   @id @default(cuid())
+  userId      String
+  taskId      String
+  type        String   // "file" | "screenshot" | "link"
+  fileUrl     String?
+  fileName    String?
+  fileSize    Int?
+  linkUrl     String?
+  comment     String?
+  status      String   @default("active") // "active" | "cancelled"
+  aiReview    String?  // JSON: { rating, feedback, tips[], locale }
+  aiReviewAt  DateTime?
+  submittedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task PracticeTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("practice_submissions")
+}
+
+// ============================================
+// AI ЧАТ — ИСТОРИЯ СООБЩЕНИЙ
+// ============================================
+
+model AiChatMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  role      String   // "user" | "assistant"
+  content   String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("ai_chat_messages")
+}
+
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String
+  achievementId String
+  earnedAt      DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id])
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
